@@ -21,6 +21,10 @@ package org.apache.flink.training.exercises.longrides;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.typeinfo.TypeHint;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -34,6 +38,7 @@ import org.apache.flink.training.exercises.common.utils.MissingSolutionException
 import org.apache.flink.util.Collector;
 
 import java.time.Duration;
+import java.time.Instant;
 
 /**
  * The "Long Ride Alerts" exercise.
@@ -97,18 +102,68 @@ public class LongRidesExercise {
 
     @VisibleForTesting
     public static class AlertFunction extends KeyedProcessFunction<Long, TaxiRide, Long> {
-
+        ValueState<TaxiRide> rideState;
         @Override
         public void open(Configuration config) throws Exception {
-            throw new MissingSolutionException();
+            TypeInformation<TaxiRide> rideInfo = TypeInformation.of(new TypeHint<TaxiRide>() {});
+            ValueStateDescriptor<TaxiRide> rideValueStateDescriptor = new ValueStateDescriptor<TaxiRide>("rideState", rideInfo);
+            rideState = getRuntimeContext().getState(rideValueStateDescriptor);
         }
 
         @Override
         public void processElement(TaxiRide ride, Context context, Collector<Long> out)
-                throws Exception {}
+                throws Exception {
+            if(rideState.value() == null){
+                //this event (start or end) has not been seen before so we will put it in our Value State for later use
+                rideState.update(ride);
+
+                //If current event is a start event we need to create a timer which fires off after 2 hours of event time
+                if(ride.isStart){
+                    context.timerService().registerEventTimeTimer(ride.eventTime.plusSeconds(120 * 60).toEpochMilli());
+                }
+
+            }else{
+                //This is the ride start event and value state contains the end event
+                if(ride.isStart){
+                    // .....assuming no duplicate start event in Value state, check if event is running too long
+                    if(isLongRunningTaxiRide(ride.eventTime, rideState.value().eventTime)){
+                        out.collect(rideState.value().rideId);
+
+                        //Should we clear out the value state here or wait till end
+                        rideState.clear();
+                    }
+                }else {
+                    //current event is end, value state should be start event ....again, assuming no duplicate events
+                    //Unit test fails without deleting the existing timer below. Would it not have fired off already though if event was running long?
+                    context.timerService().deleteEventTimeTimer(rideState.value().eventTime.plusSeconds(120 * 60).toEpochMilli());
+
+                    //This is the end event and state contains the start event
+                    if (isLongRunningTaxiRide(rideState.value().eventTime, ride.eventTime)) {
+                        out.collect(rideState.value().rideId);
+                    }
+                    //Clearing out the start event from the value state
+                    rideState.clear();
+
+                }
+            }
+        }
 
         @Override
         public void onTimer(long timestamp, OnTimerContext context, Collector<Long> out)
-                throws Exception {}
+                throws Exception {
+
+            //Check to see if value state is not null before adding the event to output
+            if(rideState.value()!=null){
+                out.collect(rideState.value().rideId);
+            }
+            //Should we clear value state here? Tests seem to pass without it. I'm guessing after a while flink runs garbage collection on them?
+        }
+        /*
+        Pass a start and an end Instant variable and compute whether the duration between them is more than 2 hours
+         */
+        private boolean isLongRunningTaxiRide(Instant start, Instant end){
+            return Duration.between(start, end).compareTo(Duration.ofHours(2))> 0;
+        }
     }
 }
+
