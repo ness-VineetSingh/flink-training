@@ -20,18 +20,12 @@ package org.apache.flink.training.exercises.hourlytips;
 
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.state.MapState;
-import org.apache.flink.api.common.state.MapStateDescriptor;
-import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.datastream.WindowedStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
-import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.api.functions.sink.PrintSinkFunction;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
@@ -40,9 +34,7 @@ import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindo
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.training.exercises.common.datatypes.TaxiFare;
-import org.apache.flink.training.exercises.common.datatypes.TaxiRide;
 import org.apache.flink.training.exercises.common.sources.TaxiFareGenerator;
-import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
 import org.apache.flink.util.Collector;
 
 /**
@@ -56,7 +48,9 @@ public class HourlyTipsExercise {
     private final SourceFunction<TaxiFare> source;
     private final SinkFunction<Tuple3<Long, Long, Float>> sink;
 
-    /** Creates a job using the source and sink provided. */
+    /**
+     * Creates a job using the source and sink provided.
+     */
     public HourlyTipsExercise(
             SourceFunction<TaxiFare> source, SinkFunction<Tuple3<Long, Long, Float>> sink) {
 
@@ -91,9 +85,8 @@ public class HourlyTipsExercise {
         // start the data generator
         DataStream<TaxiFare> fares = env.addSource(source)
                 .assignTimestampsAndWatermarks(WatermarkStrategy.<TaxiFare>forMonotonousTimestamps()
-                .withTimestampAssigner(
-                        (fare, t) -> fare.getEventTimeMillis()));
-        ;
+                        .withTimestampAssigner(
+                                (fare, t) -> fare.getEventTimeMillis()));
 
         //STEP 1: Create keyed stream by driver id
         KeyedStream<TaxiFare, Long> faresByKey = fares.keyBy((TaxiFare fare) -> fare.driverId);
@@ -112,11 +105,6 @@ public class HourlyTipsExercise {
 
         hourlyMax.addSink(sink);
 
-        // replace this with your solution
-        if (true) {
-            //throw new MissingSolutionException();
-        }
-
         // the results should be sent to the sink that was passed in
         // (otherwise the tests won't work)
         // you can end the pipeline with something like this:
@@ -129,7 +117,7 @@ public class HourlyTipsExercise {
     }
 
 
-    public static class MaxTipsFunction extends org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction< TaxiFare, Tuple3<Long, Long, Float>, Long, TimeWindow>{
+    public static class MaxTipsFunction extends org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction<TaxiFare, Tuple3<Long, Long, Float>, Long, TimeWindow> {
 
 
         @Override
@@ -142,10 +130,10 @@ public class HourlyTipsExercise {
                             Collector<Tuple3<Long, Long, Float>> out) throws Exception {
             //elements contain ALL the events in the 1 hour window. We can just add up the total tips for each event
             float totalTips = 0;
-            for(TaxiFare fare : elements){
+            for (TaxiFare fare : elements) {
                 totalTips = totalTips + fare.tip;
             }
-            out.collect(Tuple3.of(context.window().getEnd(),key,  totalTips));
+            out.collect(Tuple3.of(context.window().getEnd(), key, totalTips));
         }
     }
 }

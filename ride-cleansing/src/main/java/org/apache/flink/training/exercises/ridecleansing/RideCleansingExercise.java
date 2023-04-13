@@ -27,9 +27,6 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.training.exercises.common.datatypes.TaxiRide;
 import org.apache.flink.training.exercises.common.sources.TaxiRideGenerator;
 import org.apache.flink.training.exercises.common.utils.GeoUtils;
-import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
-
-import java.util.concurrent.Callable;
 
 /**
  * The Ride Cleansing exercise from the Flink training.
@@ -42,7 +39,9 @@ public class RideCleansingExercise {
     private final SourceFunction<TaxiRide> source;
     private final SinkFunction<TaxiRide> sink;
 
-    /** Creates a job using the source and sink provided. */
+    /**
+     * Creates a job using the source and sink provided.
+     */
     public RideCleansingExercise(SourceFunction<TaxiRide> source, SinkFunction<TaxiRide> sink) {
 
         this.source = source;
@@ -80,14 +79,15 @@ public class RideCleansingExercise {
         return env.execute("Taxi Ride Cleansing");
     }
 
-    /** Keep only those rides and both start and end in NYC. */
+    /**
+     * Keep only those rides and both start and end in NYC.
+     */
     public static class NYCFilter implements FilterFunction<TaxiRide> {
         @Override
         public boolean filter(TaxiRide taxiRide) throws Exception {
             boolean rideStartsInNYC = GeoUtils.isInNYC(taxiRide.startLon, taxiRide.startLat);
             boolean rideEndsInNYC = GeoUtils.isInNYC(taxiRide.endLon, taxiRide.endLat);
             return rideStartsInNYC && rideEndsInNYC;
-            //throw new MissingSolutionException();
         }
     }
 }

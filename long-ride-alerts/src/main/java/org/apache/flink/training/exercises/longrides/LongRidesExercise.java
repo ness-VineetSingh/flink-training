@@ -34,7 +34,6 @@ import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.training.exercises.common.datatypes.TaxiRide;
 import org.apache.flink.training.exercises.common.sources.TaxiRideGenerator;
-import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
 import org.apache.flink.util.Collector;
 
 import java.time.Duration;
@@ -52,7 +51,9 @@ public class LongRidesExercise {
     private final SourceFunction<TaxiRide> source;
     private final SinkFunction<Long> sink;
 
-    /** Creates a job using the source and sink provided. */
+    /**
+     * Creates a job using the source and sink provided.
+     */
     public LongRidesExercise(SourceFunction<TaxiRide> source, SinkFunction<Long> sink) {
         this.source = source;
         this.sink = sink;
@@ -73,16 +74,10 @@ public class LongRidesExercise {
         DataStream<TaxiRide> rides = env.addSource(source);
 
         // the WatermarkStrategy specifies how to extract timestamps and generate watermarks
-        WatermarkStrategy<TaxiRide> watermarkStrategy =
-                WatermarkStrategy.<TaxiRide>forBoundedOutOfOrderness(Duration.ofSeconds(60))
-                        .withTimestampAssigner(
-                                (ride, streamRecordTimestamp) -> ride.getEventTimeMillis());
+        WatermarkStrategy<TaxiRide> watermarkStrategy = WatermarkStrategy.<TaxiRide>forBoundedOutOfOrderness(Duration.ofSeconds(60)).withTimestampAssigner((ride, streamRecordTimestamp) -> ride.getEventTimeMillis());
 
         // create the pipeline
-        rides.assignTimestampsAndWatermarks(watermarkStrategy)
-                .keyBy(ride -> ride.rideId)
-                .process(new AlertFunction())
-                .addSink(sink);
+        rides.assignTimestampsAndWatermarks(watermarkStrategy).keyBy(ride -> ride.rideId).process(new AlertFunction()).addSink(sink);
 
         // execute the pipeline and return the result
         return env.execute("Long Taxi Rides");
@@ -94,45 +89,45 @@ public class LongRidesExercise {
      * @throws Exception which occurs during job execution.
      */
     public static void main(String[] args) throws Exception {
-        LongRidesExercise job =
-                new LongRidesExercise(new TaxiRideGenerator(), new PrintSinkFunction<>());
+        LongRidesExercise job = new LongRidesExercise(new TaxiRideGenerator(), new PrintSinkFunction<>());
 
         job.execute();
     }
 
     @VisibleForTesting
     public static class AlertFunction extends KeyedProcessFunction<Long, TaxiRide, Long> {
-        ValueState<TaxiRide> rideState;
+        transient ValueState<TaxiRide> rideState;
+
         @Override
         public void open(Configuration config) throws Exception {
-            TypeInformation<TaxiRide> rideInfo = TypeInformation.of(new TypeHint<TaxiRide>() {});
-            ValueStateDescriptor<TaxiRide> rideValueStateDescriptor = new ValueStateDescriptor<TaxiRide>("rideState", rideInfo);
+            TypeInformation<TaxiRide> rideInfo = TypeInformation.of(new TypeHint<TaxiRide>() {
+            });
+            ValueStateDescriptor<TaxiRide> rideValueStateDescriptor = new ValueStateDescriptor<>("rideState", rideInfo);
             rideState = getRuntimeContext().getState(rideValueStateDescriptor);
         }
 
         @Override
-        public void processElement(TaxiRide ride, Context context, Collector<Long> out)
-                throws Exception {
-            if(rideState.value() == null){
+        public void processElement(TaxiRide ride, Context context, Collector<Long> out) throws Exception {
+            if (rideState.value() == null) {
                 //this event (start or end) has not been seen before so we will put it in our Value State for later use
                 rideState.update(ride);
 
                 //If current event is a start event we need to create a timer which fires off after 2 hours of event time
-                if(ride.isStart){
+                if (ride.isStart) {
                     context.timerService().registerEventTimeTimer(ride.eventTime.plusSeconds(120 * 60).toEpochMilli());
                 }
 
-            }else{
+            } else {
                 //This is the ride start event and value state contains the end event
-                if(ride.isStart){
+                if (ride.isStart) {
                     // .....assuming no duplicate start event in Value state, check if event is running too long
-                    if(isLongRunningTaxiRide(ride.eventTime, rideState.value().eventTime)){
+                    if (isLongRunningTaxiRide(ride.eventTime, rideState.value().eventTime)) {
                         out.collect(rideState.value().rideId);
 
                         //Should we clear out the value state here or wait till end
                         rideState.clear();
                     }
-                }else {
+                } else {
                     //current event is end, value state should be start event ....again, assuming no duplicate events
                     //Unit test fails without deleting the existing timer below. Would it not have fired off already though if event was running long?
                     context.timerService().deleteEventTimeTimer(rideState.value().eventTime.plusSeconds(120 * 60).toEpochMilli());
@@ -149,20 +144,20 @@ public class LongRidesExercise {
         }
 
         @Override
-        public void onTimer(long timestamp, OnTimerContext context, Collector<Long> out)
-                throws Exception {
+        public void onTimer(long timestamp, OnTimerContext context, Collector<Long> out) throws Exception {
 
             //Check to see if value state is not null before adding the event to output
-            if(rideState.value()!=null){
+            if (rideState.value() != null) {
                 out.collect(rideState.value().rideId);
             }
             //Should we clear value state here? Tests seem to pass without it. I'm guessing after a while flink runs garbage collection on them?
         }
+
         /*
         Pass a start and an end Instant variable and compute whether the duration between them is more than 2 hours
          */
-        private boolean isLongRunningTaxiRide(Instant start, Instant end){
-            return Duration.between(start, end).compareTo(Duration.ofHours(2))> 0;
+        private boolean isLongRunningTaxiRide(Instant start, Instant end) {
+            return Duration.between(start, end).compareTo(Duration.ofHours(2)) > 0;
         }
     }
 }
