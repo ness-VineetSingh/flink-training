@@ -19,15 +19,23 @@
 package org.apache.flink.training.exercises.hourlytips;
 
 import org.apache.flink.api.common.JobExecutionResult;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.KeyedStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.datastream.WindowedStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.PrintSinkFunction;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.training.exercises.common.datatypes.TaxiFare;
 import org.apache.flink.training.exercises.common.sources.TaxiFareGenerator;
-import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
+import org.apache.flink.util.Collector;
 
 /**
  * The Hourly Tips exercise from the Flink training.
@@ -40,7 +48,9 @@ public class HourlyTipsExercise {
     private final SourceFunction<TaxiFare> source;
     private final SinkFunction<Tuple3<Long, Long, Float>> sink;
 
-    /** Creates a job using the source and sink provided. */
+    /**
+     * Creates a job using the source and sink provided.
+     */
     public HourlyTipsExercise(
             SourceFunction<TaxiFare> source, SinkFunction<Tuple3<Long, Long, Float>> sink) {
 
@@ -73,12 +83,27 @@ public class HourlyTipsExercise {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
         // start the data generator
-        DataStream<TaxiFare> fares = env.addSource(source);
+        DataStream<TaxiFare> fares = env.addSource(source)
+                .assignTimestampsAndWatermarks(WatermarkStrategy.<TaxiFare>forMonotonousTimestamps()
+                        .withTimestampAssigner(
+                                (fare, t) -> fare.getEventTimeMillis()));
 
-        // replace this with your solution
-        if (true) {
-            throw new MissingSolutionException();
-        }
+        //STEP 1: Create keyed stream by driver id
+        KeyedStream<TaxiFare, Long> faresByKey = fares.keyBy((TaxiFare fare) -> fare.driverId);
+
+        //faresByKey.print();--use for testing only
+        //STEP 2: Create a window of 1 hour on that keyed stream
+        WindowedStream<TaxiFare, Long, TimeWindow> windowedKeyFares = faresByKey
+                .window(TumblingEventTimeWindows.of(Time.hours(1)));
+
+        //Invoke MaxTipsFunction on the windowed stream. This gives us all events in that 1 hour window to calculate tips
+        SingleOutputStreamOperator<Tuple3<Long, Long, Float>> totalTips = windowedKeyFares.process(new MaxTipsFunction());
+
+        //totalTips.print();//use for testing only
+
+        SingleOutputStreamOperator<Tuple3<Long, Long, Float>> hourlyMax = totalTips.windowAll(TumblingEventTimeWindows.of(Time.hours(1))).maxBy(2);
+
+        hourlyMax.addSink(sink);
 
         // the results should be sent to the sink that was passed in
         // (otherwise the tests won't work)
@@ -89,5 +114,26 @@ public class HourlyTipsExercise {
 
         // execute the pipeline and return the result
         return env.execute("Hourly Tips");
+    }
+
+
+    public static class MaxTipsFunction extends org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction<TaxiFare, Tuple3<Long, Long, Float>, Long, TimeWindow> {
+
+
+        @Override
+        public void process(Long key, ProcessWindowFunction<
+                TaxiFare,
+                Tuple3<Long, Long, Float>,
+                Long,
+                TimeWindow>.Context context,
+                            Iterable<TaxiFare> elements,
+                            Collector<Tuple3<Long, Long, Float>> out) throws Exception {
+            //elements contain ALL the events in the 1 hour window. We can just add up the total tips for each event
+            float totalTips = 0;
+            for (TaxiFare fare : elements) {
+                totalTips = totalTips + fare.tip;
+            }
+            out.collect(Tuple3.of(context.window().getEnd(), key, totalTips));
+        }
     }
 }
